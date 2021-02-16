@@ -1,32 +1,80 @@
-library(lme4)
+library(afex)
 library(effects)
 library(RePsychLing)
-library(car)
-#library(glmmADMB)
-
-vif.mer <- function (fit) {
-  ## adapted from rms::vif
-  v <- vcov(fit)
-  nam <- names(fixef(fit))
-  ## exclude intercepts
-  ns <- sum(1 * (nam == "Intercept" | nam == "(Intercept)"))
-  if (ns > 0) {
-    v <- v[-(1:ns), -(1:ns), drop = FALSE]
-    nam <- nam[-(1:ns)]
-  }
-  d <- diag(v)^0.5
-  v <- diag(solve(v/(d %o% d)))
-  names(v) <- nam
-  v
-}
+library(corrplot)
+library(rcompanion)
 
 setwd("~/GitHub/yorkshire-assimilation")
 ya = na.omit(read.csv("./dataset_voicing2.csv"))
 ya$participant = as.factor(ya$participant)
-ya$mean_freq = rowMeans(ya[c("w1_freq", "w2_freq")])
-ya$sum_freq = ya$w1_freq + ya$w2_freq
-ya$voicing_dur = ya$voicing_proportion * ya$cons_length
-ya$voicing_prop_trans = (ya$voicing_proportion*(ya$n_frames - 1) + 0.5) / ya$n_frames
+
+# check for correlations among predictors:
+# continous
+continuous = c("w1_freq", "w2_freq")
+corrplot(cor(ya[, continuous]), method = "number")
+
+# categorical
+categorical = c("item_condition", "vowel_type", "C1_MoA", "C2_MoA")
+cat_mat = matrix(data = c(cramerV(table(ya[,c("item_condition", "item_condition")]), bias.correct = TRUE),
+                          cramerV(table(ya[,c("item_condition", "vowel_type")]), bias.correct = TRUE),
+                          cramerV(table(ya[,c("item_condition", "C1_MoA")]), bias.correct = TRUE),
+                          cramerV(table(ya[,c("item_condition", "C2_MoA")]), bias.correct = TRUE),
+                          cramerV(table(ya[,c("vowel_type", "item_condition")]), bias.correct = TRUE),
+                          cramerV(table(ya[,c("vowel_type", "vowel_type")]), bias.correct = TRUE),
+                          cramerV(table(ya[,c("vowel_type", "C1_MoA")]), bias.correct = TRUE),
+                          cramerV(table(ya[,c("vowel_type", "C2_MoA")]), bias.correct = TRUE),
+                          cramerV(table(ya[,c("C1_MoA", "item_condition")]), bias.correct = TRUE),
+                          cramerV(table(ya[,c("C1_MoA", "vowel_type")]), bias.correct = TRUE),
+                          cramerV(table(ya[,c("C1_MoA", "C1_MoA")]), bias.correct = TRUE),
+                          cramerV(table(ya[,c("C1_MoA", "C2_MoA")]), bias.correct = TRUE),
+                          cramerV(table(ya[,c("C2_MoA", "item_condition")]), bias.correct = TRUE),
+                          cramerV(table(ya[,c("C2_MoA", "vowel_type")]), bias.correct = TRUE),
+                          cramerV(table(ya[,c("C2_MoA", "C1_MoA")]), bias.correct = TRUE),
+                          cramerV(table(ya[,c("C2_MoA", "C2_MoA")]), bias.correct = TRUE)),
+                 nrow = 4, ncol = 4, byrow = TRUE,
+                 dimnames = list(categorical, categorical))
+
+corrplot(cat_mat, method = "number")
+table(ya[, c("C1_MoA","vowel_type")])
+long = ya[ya$vowel_type == "long",]
+categorical = c("item_condition", "C1_MoA", "C2_MoA")
+
+# categorical - continuous
+cat_cont = matrix(data = c(sqrt(summary(lm(w1_freq ~ item_condition, data = long))$r.squared),
+                           sqrt(summary(lm(w1_freq ~ C1_MoA, data = long))$r.squared),
+                           sqrt(summary(lm(w1_freq ~ C2_MoA, data = long))$r.squared),
+                           sqrt(summary(lm(w2_freq ~ item_condition, data = long))$r.squared),
+                           sqrt(summary(lm(w2_freq ~ C1_MoA, data = long))$r.squared),
+                           sqrt(summary(lm(w2_freq ~ C2_MoA, data = long))$r.squared)),
+                  nrow = 3, ncol = 2, byrow = TRUE,
+                  dimnames = list(categorical, continuous))
+
+corrplot(cat_cont, method = "number")
+
+dummies = dummy(long$item_condition)
+cond_sonorant = dummies[,1]
+cond_voiced = dummies[,2]
+cond_voiceless = dummies[,3]
+
+max1 = lmer(ratio ~ w1_freq + w2_freq + C2_MoA
+            + item_condition*C1_MoA 
+            + (1 + cond_sonorant + cond_voiced + cond_voiceless | participant) + (1 | word), data = long)
+
+max1b = lmer(ratio ~ w1_freq + w2_freq + C2_MoA
+             + item_condition*C1_MoA 
+             + (1 + cond_sonorant + cond_voiced + cond_voiceless || participant) + (1 | word), data = long)
+
+# at this point some authors might keep this zcp random effects structure
+# but others would not accept variance components that are estimated at 0
+
+max2 = mixed(ratio ~ w1_freq + w2_freq + C2_MoA
+             + item_condition*C1_MoA 
+             + (1+item_condition|participant) + (1|word), data = long)
+
+#ya$mean_freq = rowMeans(ya[c("w1_freq", "w2_freq")])
+#ya$sum_freq = ya$w1_freq + ya$w2_freq
+#ya$voicing_dur = ya$voicing_proportion * ya$cons_length
+#ya$voicing_prop_trans = (ya$voicing_proportion*(ya$n_frames - 1) + 0.5) / ya$n_frames
 
 d0 = lmer(ratio ~ 1 + (1|participant) + (1|word), data = ya)
 d1 = lmer(ratio ~ 1 + vowel_type + (1|participant) + (1|word), data = ya)
